@@ -10,67 +10,8 @@ import UIKit
 
 class PhotosCollectionViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        
-        client.fetchMarsRover(named: "curiosity") { (rover, error) in
-            if let error = error {
-                NSLog("Error fetching info for curiosity: \(error)")
-                return
-            }
-            
-            self.roverInfo = rover
-        }
-    }
-    
-    // UICollectionViewDataSource/Delegate
-    
-    func numberOfSections(in collectionView: UICollectionView) -> Int {
-        return 1
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        return photoReferences.count
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ImageCell", for: indexPath) as? ImageCollectionViewCell ?? ImageCollectionViewCell()
-        
-        loadImage(forCell: cell, forItemAt: indexPath)
-        
-        return cell
-    }
-    
-    // Make collection view cells fill as much available width as possible
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let flowLayout = collectionViewLayout as! UICollectionViewFlowLayout
-        var totalUsableWidth = collectionView.frame.width
-        let inset = self.collectionView(collectionView, layout: collectionViewLayout, insetForSectionAt: indexPath.section)
-        totalUsableWidth -= inset.left + inset.right
-        
-        let minWidth: CGFloat = 150.0
-        let numberOfItemsInOneRow = Int(totalUsableWidth / minWidth)
-        totalUsableWidth -= CGFloat(numberOfItemsInOneRow - 1) * flowLayout.minimumInteritemSpacing
-        let width = totalUsableWidth / CGFloat(numberOfItemsInOneRow)
-        return CGSize(width: width, height: width)
-    }
-    
-    // Add margins to the left and right side
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
-        return UIEdgeInsets(top: 0, left: 10.0, bottom: 0, right: 10.0)
-    }
-    
-    // MARK: - Private
-    
-    private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
-        
-        // let photoReference = photoReferences[indexPath.item]
-        
-        // TODO: Implement image loading here
-    }
-    
-    // Properties
-    
+    // MARK: - Properties
+
     private let client = MarsRoverClient()
     
     private var roverInfo: MarsRover? {
@@ -89,11 +30,103 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
             }
         }
     }
+    
     private var photoReferences = [MarsPhotoReference]() {
         didSet {
             DispatchQueue.main.async { self.collectionView?.reloadData() }
         }
     }
     
+    var cache: Cache<Int, Data> = Cache()
+           //  Cache<Key, Value>
+        
+    // MARK: - Outlets
+    
     @IBOutlet var collectionView: UICollectionView!
+    
+    // MARK: - Functions
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        client.fetchMarsRover(named: "curiosity") { (rover, error) in
+            if let error = error {
+                NSLog("Error fetching info for curiosity: \(error)")
+                return
+            }
+            
+            self.roverInfo = rover
+        }
+    }
+
+    // MARK: - UICollectionViewDataSource/Delegate
+
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        return 1
+    }
+
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return photoReferences.count
+    }
+
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ImageCell", for: indexPath) as? ImageCollectionViewCell ?? ImageCollectionViewCell()
+        
+        loadImage(forCell: cell, forItemAt: indexPath)
+        
+        return cell
+    }
+
+    // Make collection view cells fill as much available width as possible
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        let flowLayout = collectionViewLayout as! UICollectionViewFlowLayout
+        var totalUsableWidth = collectionView.frame.width
+        let inset = self.collectionView(collectionView, layout: collectionViewLayout, insetForSectionAt: indexPath.section)
+        totalUsableWidth -= inset.left + inset.right
+        
+        let minWidth: CGFloat = 150.0
+        let numberOfItemsInOneRow = Int(totalUsableWidth / minWidth)
+        totalUsableWidth -= CGFloat(numberOfItemsInOneRow - 1) * flowLayout.minimumInteritemSpacing
+        let width = totalUsableWidth / CGFloat(numberOfItemsInOneRow)
+        return CGSize(width: width, height: width)
+    }
+
+    // Add margins to the left and right side
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
+        return UIEdgeInsets(top: 0, left: 10.0, bottom: 0, right: 10.0)
+    }
+
+    // MARK: - Private
+
+    private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
+        
+        let photoReference = photoReferences[indexPath.item]
+                
+        guard let requestURL = photoReference.imageURL.usingHTTPS else { return }
+        
+        if let photoData = cache.value(for: photoReference.id) {
+            cell.imageView.image = UIImage(data: photoData)
+        } else {
+            URLSession.shared.dataTask(with: requestURL) { (data, _, error) in
+                
+                if let error = error {
+                    NSLog("Error loading image from server: \(error)")
+                    return
+                }
+                
+                guard let data = data else {
+                    NSLog("No data returned from data task")
+                    return
+                }
+                self.cache.cache(value: data, for: photoReference.id)
+                DispatchQueue.main.async {
+                    if let cellIndexPath = self.collectionView.indexPath(for: cell),
+                        cellIndexPath != indexPath {
+                        return
+                    }
+                    cell.imageView.image = UIImage(data: data)
+                }
+            }.resume()
+        }
+    }
 }
